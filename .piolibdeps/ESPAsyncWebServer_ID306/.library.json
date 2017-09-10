@@ -1,0 +1,33 @@
+{
+    "name": "ESPAsyncWebServer", 
+    "repository": {
+        "url": "https://github.com/me-no-dev/ESPAsyncWebServer.git", 
+        "type": "git"
+    }, 
+    "platforms": [
+        "espressif8266"
+    ], 
+    "frameworks": [
+        "arduino"
+    ], 
+    "dependencies": {
+        "name": "ESPAsyncTCP"
+    }, 
+    "version": "2540507664", 
+    "authors": [
+        {
+            "url": null, 
+            "maintainer": true, 
+            "email": null, 
+            "name": "Hristo Gochkov"
+        }
+    ], 
+    "keywords": [
+        "async", 
+        "websocket", 
+        "http", 
+        "webserver"
+    ], 
+    "id": 306, 
+    "description": "Asynchronous HTTP and WebSocket Server Library for ESP8266 and ESP32"
+}

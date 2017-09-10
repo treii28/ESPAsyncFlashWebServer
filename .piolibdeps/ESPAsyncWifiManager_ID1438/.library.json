@@ -1,0 +1,28 @@
+{
+    "name": "ESPAsyncWifiManager", 
+    "repository": {
+        "url": "https://github.com/alanswx/ESPAsyncWiFiManager.git", 
+        "type": "git"
+    }, 
+    "platforms": [
+        "espressif8266"
+    ], 
+    "frameworks": [
+        "arduino"
+    ], 
+    "version": "0.12", 
+    "authors": [
+        {
+            "maintainer": false, 
+            "name": "Alan Steremberg", 
+            "url": "https://github.com/alanswx", 
+            "email": null
+        }
+    ], 
+    "keywords": [
+        "wifi", 
+        "wi-fi"
+    ], 
+    "id": 1438, 
+    "description": "ESP8266 Async WiFi Connection manager with fallback web configuration portal"
+}
