@@ -305,7 +305,8 @@ void initDebug() {
 }
 void initWifiManager() {
     AsyncWiFiManager wifiManager(&server, &dns);
-    wifiManager.autoConnect();
+    //wifiManager.autoConnect("espWiFiMgr");
+    wifiManager.startConfigPortal("espWiFiMgr");
 }
 void initMDNS() {
     if (MDNS.begin(host)) {
