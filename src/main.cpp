@@ -1,17 +1,29 @@
 #define DBG_OUTPUT_PORT Serial
 
-// deeded for platformio
+// WIFI_AUTOCONNECT_MODE WIFI_CFGPORTAL_MODE WIFI_SOFTAP_MODE
+#define WIFI_SOFTAP_MODE
+
+// needed for platformio
 #include <Arduino.h>
 // needed for async webserver that doesn't seem to find Hash
 #include <Hash.h>
 #include <FS.h>
 #include <ESPAsyncWebServer.h>
+
+#if defined (WIFI_AUTOCONNECT_MODE) || (defined WIFI_CFGPORTAL_MODE)
 #include <ESPAsyncWiFiManager.h>
+#endif
+#ifdef WIFI_SOFTAP_MODE
+#include <ESP8266WiFi.h>
+#include <DNSServer.h>
+#endif
+
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 
-
 const char* host = "FlashAsync";
+const char* ssid = "ESPWiFi";
+IPAddress ip ( 10, 10, 10, 1 ); // for softAP mode if used
 
 AsyncWebServer server(80);
 DNSServer dns;
@@ -297,17 +309,34 @@ void handleDelete(AsyncWebServerRequest *request){
         returnFail(request, "remove " + fInf.path + " failed");
     }
 }
+void captivePortalTarget(AsyncWebServerRequest *request) {
+    request->redirect("/index.htm");
+}
 
 void initDebug() {
     DBG_OUTPUT_PORT.begin(115200);
     DBG_OUTPUT_PORT.setDebugOutput(true);
     DBG_OUTPUT_PORT.println("Debug output initialized");
 }
-void initWifiManager() {
+void initWifi() {
+ #if defined (WIFI_AUTOCONNECT_MODE) || (defined WIFI_CFGPORTAL_MODE)
     AsyncWiFiManager wifiManager(&server, &dns);
-    //wifiManager.autoConnect("espWiFiMgr");
-    wifiManager.startConfigPortal("espWiFiMgr");
+#endif
+#ifdef WIFI_AUTOCONNECT_MODE
+    wifiManager.autoConnect(ssid);
+#endif
+#ifdef WIFI_CFGPORTAL_MODE
+    wifiManager.startConfigPortal(ssid);
+#endif
+#ifdef WIFI_SOFTAP_MODE
+    WiFi.hostname(host);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig ( ip, ip, IPAddress ( 255, 255, 255, 0 ) );
+    WiFi.softAP(ssid);
+    //dns.start ( 53, "*", WiFi.softAPIP() ); // captive portal redirect everything to here when in AP mode
+#endif
 }
+
 void initMDNS() {
     if (MDNS.begin(host)) {
         MDNS.addService("http", "tcp", 80);
@@ -324,6 +353,12 @@ void initWebserver() {
     // Catch-All Handlers
     server.onFileUpload(handleUpload);
     //server.onRequestBody(onBody);
+
+    //Android captive portal. Maybe not needed. Might be handled by notFound handler.
+    server.on ( "/generate_204", captivePortalTarget );
+    //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
+    server.on ( "/fwlink", captivePortalTarget );
+
     server.onNotFound(handleNotFound);
 
     server.begin();
@@ -396,7 +431,7 @@ void initOTA() {
 
 void setup() {
     initDebug();
-    initWifiManager();
+    initWifi();
     initMDNS();
     initWebserver();
     initSPIFFS();
