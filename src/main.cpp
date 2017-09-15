@@ -64,11 +64,77 @@ IPAddress ip ( 10, 10, 10, 10 ); // for softAP mode if used
 AsyncWebServer asyncWebServer(80);
 DNSServer dnsServer;
 FSInfo fs_info;
+String serverError;
 
 void returnOK(AsyncWebServerRequest *request) {request->send(200, "text/plain", "");}
 
 void returnFail(AsyncWebServerRequest *request, String msg) {request->send(500, "text/plain", msg + "\r\n");}
 
+void returnFailJSON(AsyncWebServerRequest *request, String msg) {request->send(500, "application/json", "{serverError:\"" + msg + "\"}");}
+
+void logData(String csvString)
+{
+    DBG_OUTPUT_PORT.println("appending entry to log");
+    // open the file. note that only one file can be open at a time,
+    // so you have to close this one before opening another.
+    File dataFile = SPIFFS.open("/datalog.csv", "w");
+
+    // if the file is available, write to it:
+    if (dataFile) {
+        dataFile.println(csvString);
+        dataFile.close();
+        // print to the serial port too:
+        DBG_OUTPUT_PORT.println(csvString);
+    }
+        // if the file isn't open, pop up an error:
+    else {
+        DBG_OUTPUT_PORT.println("error opening datalog.txt");
+        serverError = "FILE ERROR";
+    }
+}
+
+void addLog(AsyncWebServerRequest *request) {
+    DBG_OUTPUT_PORT.println("adding new log entry");
+    String logLine = "";
+
+    // date is first CSV field - created by code
+    logLine += (request->hasArg("datetime")) ? request->arg("datetime") : "";
+    DBG_OUTPUT_PORT.println("Date and Time is: " + String(request->arg("datetime")));
+
+    logLine += "|";
+
+    // name is next, sanitize quotes and pipes
+    String name = (request->hasArg("name")) ? request->arg("name") : "";
+    name.replace("\"", "\"\"");
+    name.replace("|", "");
+    if (name == "") returnFail(request, "NAME REQUIRED");
+    logLine += name;
+
+    logLine += "|";
+
+    // id is digits or blank. Should be sanitized by form/code
+    logLine += (request->hasArg("memberId")) ? request->arg("memberId") : "";
+
+    logLine += "|";
+
+    // sanitize quotes and pipes in comment
+    String comment = (request->hasArg("comment")) ? request->arg("comment") : "";
+    comment.replace("\"", "\"\"");
+    name.replace("|", "");
+    logLine += comment;
+
+    logLine += "\n";
+    DBG_OUTPUT_PORT.println(logLine);
+
+    // call logData to append line to log file
+    logData(logLine);
+    if (serverError != "") {
+        returnFailJSON(request, serverError);
+        serverError = "";
+    } else {
+        request->redirect("/datalog.csv");
+    }
+}
 
 PINF getPathInfo(String path) {
     PINF pInfo;
@@ -244,6 +310,8 @@ void handleNotFound(AsyncWebServerRequest *request){
     String path = request->url();
     if(loadFromFlash(request)){
         return;
+    } else {
+        DBG_OUTPUT_PORT.println("load from flash failed");
     }
     String message = "\nNo Handler\r\n";
     message += "URI: ";
@@ -258,7 +326,7 @@ void handleNotFound(AsyncWebServerRequest *request){
         message += String(p->name().c_str()) + " : " + String(p->value().c_str()) + "\r\n";
     }
     request->send(404, "text/plain", message);
-    DBG_OUTPUT_PORT.print(message);
+    //DBG_OUTPUT_PORT.print(message);
 }
 
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
@@ -339,6 +407,7 @@ void handleDelete(AsyncWebServerRequest *request){
 
 void initDebug() {
     DBG_OUTPUT_PORT.begin(115200);
+    delay(1500);
     DBG_OUTPUT_PORT.setDebugOutput(true);
     DBG_OUTPUT_PORT.println("Debug output initialized");
 }
@@ -391,6 +460,7 @@ void initWebserver() {
     // kindle
     asyncWebServer.on ( "/kindle-wifi/wifistub.html", returnOK );
 
+    asyncWebServer.on("/signin", HTTP_GET, addLog);
 
     asyncWebServer.onNotFound(handleNotFound);
 
