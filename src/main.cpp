@@ -1,41 +1,169 @@
+#ifndef  DBG_OUTPUT_PORT
 #define DBG_OUTPUT_PORT Serial
+#endif
 
-// WIFI_AUTOCONNECT_MODE WIFI_CFGPORTAL_MODE WIFI_SOFTAP_MODE
+// valide modes:
+// WIFI_AUTOCONNECT_MODE or WIFI_CFGPORTAL_MODE (only one should be used)
+//   CFGPORTAL mode forces the wifi manager configuration portal to be always listening
+//     and is used for testing or initial setup (autoconnect sometimes connects to open wifi nodes)
+// and WIFI_SOFTAP_MODE
 #define WIFI_SOFTAP_MODE
 
 // needed for platformio
+#ifndef Arduino_
 #include <Arduino.h>
+#endif
+
 // needed for async webserver that doesn't seem to find Hash
+#ifndef HASH_H_
 #include <Hash.h>
+#endif
+#ifndef FS_H
 #include <FS.h>
+#endif
+#ifndef _ESPAsyncWebServer_H_
 #include <ESPAsyncWebServer.h>
+#endif
 
 #if defined (WIFI_AUTOCONNECT_MODE) || (defined WIFI_CFGPORTAL_MODE)
+#ifndef ESPAsyncWiFiManager_h
 #include <ESPAsyncWiFiManager.h>
 #endif
+#endif
+
 #ifdef WIFI_SOFTAP_MODE
+#ifndef WiFi_h
 #include <ESP8266WiFi.h>
+#endif
+#ifndef DNSServer_h
 #include <DNSServer.h>
+#endif
 #endif
 
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 
-#include "PathInfo.h"
+
+typedef struct pathInfo {
+    String path;
+    String dir;
+    String name;
+    String base;
+    String ext;
+    String type;
+    bool gzip = false;
+    bool compress = false;
+    bool min = false;
+} PINF;
 
 const byte DNS_PORT = 53;
 const char* host = "FlashAsync";
-const char* ssid = "ESPWiFi";
-IPAddress ip ( 10, 10, 10, 1 ); // for softAP mode if used
+const char* ssid = "ESPWiFiMini";
+IPAddress ip ( 10, 10, 10, 10 ); // for softAP mode if used
 
-AsyncWebServer server(80);
-DNSServer dns;
+AsyncWebServer asyncWebServer(80);
+DNSServer dnsServer;
 FSInfo fs_info;
-PathInfo p_info;
 
 void returnOK(AsyncWebServerRequest *request) {request->send(200, "text/plain", "");}
 
 void returnFail(AsyncWebServerRequest *request, String msg) {request->send(500, "text/plain", msg + "\r\n");}
+
+
+PINF getPathInfo(String path) {
+    PINF pInfo;
+    pInfo.path = path;
+    int8_t lastIdx = path.lastIndexOf("/");
+    pInfo.dir = "";
+    pInfo.name = path;
+    if((lastIdx != -1) && (lastIdx > 0)) {
+        pInfo.dir = path.substring(0, lastIdx + 1);
+        pInfo.name = path.substring(lastIdx+1);
+    }
+    lastIdx = pInfo.name.lastIndexOf(".");
+    if(lastIdx != -1) {
+        pInfo.base = pInfo.name.substring(0, lastIdx);
+        pInfo.ext = pInfo.name.substring(lastIdx+1);
+
+        // comment out next 6 lines to keep .min. in basenames
+        lastIdx = pInfo.base.lastIndexOf(".min");
+        if(lastIdx != -1) {
+            pInfo.min = true;
+            pInfo.base = pInfo.base.substring(0, lastIdx) + pInfo.base.substring(lastIdx+4);
+            DBG_OUTPUT_PORT.println("unminified base: " + pInfo.base);
+        }
+
+        while((pInfo.ext == "gz") || (pInfo.ext == "Z") || (pInfo.ext == "z")) {
+            if(pInfo.ext == "gz") {
+                pInfo.gzip = true;
+            } else if((pInfo.ext == "Z") || (pInfo.ext == "z")) {
+                pInfo.compress = true;
+            }
+            lastIdx = pInfo.base.lastIndexOf(".");
+            if(lastIdx != -1) {
+                pInfo.ext = pInfo.base.substring(lastIdx+1);
+                pInfo.base = pInfo.base.substring(0, lastIdx);
+            }
+        }
+    } else {
+        pInfo.base = pInfo.name;
+        pInfo.ext = "";
+    }
+    pInfo.type = "application/octet-stream";
+
+    if(pInfo.ext == "htm") pInfo.type = "text/html";
+    else if(pInfo.ext == "txt") pInfo.type = "text/plain";
+    else if(pInfo.ext == "css") pInfo.type = "text/css";
+    else if(pInfo.ext == "xml") pInfo.type = "text/xml";
+    else if(pInfo.ext == "rtf") pInfo.type = "text/richtext";
+    else if(pInfo.ext == "csv") pInfo.type = "text/csv";
+    else if(pInfo.ext == "js")  pInfo.type = "application/javascript";
+    else if(pInfo.ext == "png") pInfo.type = "image/png";
+    else if(pInfo.ext == "gif") pInfo.type = "image/gif";
+    else if((pInfo.ext == "jpg") || (pInfo.ext == "jpeg")) pInfo.type = "image/jpeg";
+    else if(pInfo.ext == "ico") pInfo.type = "image/x-icon";
+    else if(pInfo.ext == "svg") pInfo.type = "image/svg+xml";
+    else if(pInfo.ext == "pdf") pInfo.type = "application/pdf";
+    else if(pInfo.ext == "zip") pInfo.type = "application/zip";
+
+    return pInfo;
+}
+
+PINF getTruePathInfo(String fPath) {
+    PINF fpInf = getPathInfo(fPath);
+    if(SPIFFS.exists(fpInf.path))
+        return fpInf;
+
+    DBG_OUTPUT_PORT.println("path not found, trying alternatives...");
+
+    DBG_OUTPUT_PORT.println("Trying...");
+    String altPath = fpInf.path + ".gz";
+    DBG_OUTPUT_PORT.println("   " + altPath);
+    if((altPath.length() <= fs_info.maxPathLength) && SPIFFS.exists(altPath)) {
+        fpInf.gzip = true;
+        fpInf.path = altPath;
+    } else if(!fpInf.min && !fpInf.gzip && !fpInf.compress && (fpInf.ext != "")) {
+        altPath = fpInf.dir + fpInf.base + ".min." + fpInf.ext;
+        DBG_OUTPUT_PORT.println("   " + altPath);
+        if((altPath.length() <= fs_info.maxPathLength) && SPIFFS.exists(altPath)) {
+            fpInf.min = true;
+            fpInf.path = altPath;
+        } else {
+            altPath = altPath + ".gz";
+            DBG_OUTPUT_PORT.println("   " + altPath);
+            if((altPath.length() <= fs_info.maxPathLength) && SPIFFS.exists(altPath)) {
+                fpInf.gzip = true;
+                fpInf.path = altPath;
+            }
+        }
+    }
+    if(fPath != fpInf.path ) {
+        DBG_OUTPUT_PORT.println("using alternate path: " + altPath);
+    }
+
+    return fpInf;
+}
+
 
 bool printDir(AsyncWebServerRequest *request) {
     String dPath = request->url();
@@ -46,7 +174,7 @@ bool printDir(AsyncWebServerRequest *request) {
     Dir webDir = SPIFFS.openDir(dPath);
     String dirList = "";
     while (webDir.next()) {
-        PINF pInfo = p_info.getPathInfo(webDir.fileName());
+        PINF pInfo = getPathInfo(webDir.fileName());
         String fName = pInfo.base + "." + pInfo.ext;
         dirList += "<tr><td><a href=\"" + pInfo.dir + fName + "\">" +fName + "</a></td><td>&nbsp;...&nbsp;</td>";
         File f = webDir.openFile("r");
@@ -68,13 +196,13 @@ bool loadFromFlash(AsyncWebServerRequest *request) {
     String path = request->url();
     DBG_OUTPUT_PORT.println("checking flash for " + path);
 
-    PINF upInf = p_info.getTruePathInfo(path);
+    PINF upInf = getTruePathInfo(path);
 
     // if upInf doesn't include an existing file, try index.htm and/or try listing directory
     if(!SPIFFS.exists(upInf.path)) {
         if(path.endsWith("/")) { // user seems to be trying to get a dir listing
             // check for index file in dir first
-            PINF ixInf = p_info.getTruePathInfo(path + "index.htm");
+            PINF ixInf = getTruePathInfo(path + "index.htm");
             // filenames must be under 32 characters all told
             if(SPIFFS.exists(ixInf.path)) {
                 upInf = ixInf;
@@ -83,7 +211,7 @@ bool loadFromFlash(AsyncWebServerRequest *request) {
             }
         } else {
             // try slash+index.htm just for kicks
-            PINF ixInf = p_info.getTruePathInfo(path + "/index.htm");
+            PINF ixInf = getTruePathInfo(path + "/index.htm");
             if (SPIFFS.exists(ixInf.path)) {
                 upInf = ixInf;
             } else {
@@ -198,7 +326,7 @@ void handleDelete(AsyncWebServerRequest *request){
     String path = request->arg("path");
     if(path == "/")
         returnFail(request, "Invalid Path");
-    PINF fInf = p_info.getTruePathInfo(path);
+    PINF fInf = getTruePathInfo(path);
     if(!SPIFFS.exists(fInf.path)) {
         returnFail(request, "Bad Path");
     }
@@ -208,9 +336,6 @@ void handleDelete(AsyncWebServerRequest *request){
         returnFail(request, "remove " + fInf.path + " failed");
     }
 }
-void captivePortalTarget(AsyncWebServerRequest *request) {
-    request->redirect("/index.htm");
-}
 
 void initDebug() {
     DBG_OUTPUT_PORT.begin(115200);
@@ -219,7 +344,7 @@ void initDebug() {
 }
 void initWifi() {
  #if defined (WIFI_AUTOCONNECT_MODE) || (defined WIFI_CFGPORTAL_MODE)
-    AsyncWiFiManager wifiManager(&server, &dns);
+    AsyncWiFiManager wifiManager(&asyncWebServer, &dnsServer);
 #endif
 #ifdef WIFI_AUTOCONNECT_MODE
     wifiManager.autoConnect(ssid);
@@ -232,8 +357,8 @@ void initWifi() {
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig ( ip, ip, IPAddress ( 255, 255, 255, 0 ) );
     WiFi.softAP(ssid);
-    dns.setErrorReplyCode(DNSReplyCode::NoError);
-    //dns.start ( DNS_PORT, "*", WiFi.softAPIP() ); // captive portal redirect everything to here when in AP mode
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    dnsServer.start ( DNS_PORT, "*", WiFi.softAPIP() ); // captive portal redirect everything to here when in AP mode
 #endif
 }
 
@@ -247,22 +372,30 @@ void initMDNS() {
     }
 }
 void initWebserver() {
-    server.on("/delete", HTTP_DELETE, handleDelete);
+    asyncWebServer.on("/delete", HTTP_DELETE, handleDelete);
     // upload a file to /upload
-    server.on("/upload", HTTP_POST, returnOK, handleUpload);
+    asyncWebServer.on("/upload", HTTP_POST, returnOK, handleUpload);
     // Catch-All Handlers
-    server.onFileUpload(handleUpload);
-    //server.onRequestBody(onBody);
+    asyncWebServer.onFileUpload(handleUpload);
+    //asyncWebServer.onRequestBody(onBody);
 
     //Android captive portal. Maybe not needed. Might be handled by notFound handler.
-    server.on ( "/generate_204", captivePortalTarget );
+    asyncWebServer.on ( "/generate_204", returnOK );
     //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
-    server.on ( "/fwlink", captivePortalTarget );
+    asyncWebServer.on ( "/fwlink", returnOK );
+    //Microsoft windows 10
+    asyncWebServer.on ( "/connecttest.txt", returnOK );
+    // apple devices
+    asyncWebServer.on ( "/hotspot-detect.html", returnOK );
+    asyncWebServer.on ( "/library/test/success.html", returnOK );
+    // kindle
+    asyncWebServer.on ( "/kindle-wifi/wifistub.html", returnOK );
 
-    server.onNotFound(handleNotFound);
 
-    server.begin();
-    DBG_OUTPUT_PORT.println("HTTP server started");
+    asyncWebServer.onNotFound(handleNotFound);
+
+    asyncWebServer.begin();
+    DBG_OUTPUT_PORT.println("HTTP asyncWebServer started");
 }
 void getSPIFFSInfo() {
     DBG_OUTPUT_PORT.println("Filesystem Info:");
@@ -340,4 +473,5 @@ void setup() {
 
 void loop() {
     ArduinoOTA.handle();
+    dnsServer.processNextRequest();
 }
