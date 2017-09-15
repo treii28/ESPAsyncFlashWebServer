@@ -77,7 +77,7 @@ void logData(String csvString)
     DBG_OUTPUT_PORT.println("appending entry to log");
     // open the file. note that only one file can be open at a time,
     // so you have to close this one before opening another.
-    File dataFile = SPIFFS.open("/datalog.csv", "w");
+    File dataFile = SPIFFS.open("/datalog.csv", "a+");
 
     // if the file is available, write to it:
     if (dataFile) {
