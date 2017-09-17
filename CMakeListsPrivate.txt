@@ -49,6 +49,7 @@ include_directories("$ENV{HOME}/.platformio/packages/toolchain-xtensa/lib/gcc/xt
 include_directories("$ENV{HOME}/.platformio/packages/toolchain-xtensa/lib/gcc/xtensa-lx106-elf/4.8.2/include-fixed")
 include_directories("$ENV{HOME}/.platformio/packages/tool-unity")
 
+include_directories("$ENV{HOME}/.platformio/lib/ArduinoJson_ID64")
 include_directories("$ENV{HOME}/.platformio/lib/ESPAsyncWifiManager_ID1438")
 include_directories("$ENV{HOME}/.platformio/lib/ESPAsyncTCP_ID305/src")
 include_directories("$ENV{HOME}/.platformio/lib/ESPAsyncWebServer_ID306/src")
