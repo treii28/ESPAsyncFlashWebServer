@@ -16,6 +16,22 @@ add_custom_target(
 )
 
 add_custom_target(
+        PLATFORMIO_UPLOAD_HUZZAH ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target upload --environment huzzah
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_custom_target(
+        PLATFORMIO_UPLOAD_NODEMCUV2 ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target upload --environment nodemcuv2
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_custom_target(
+        PLATFORMIO_UPLOAD_ESP01 ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target upload --environment esp01
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_custom_target(
     PLATFORMIO_CLEAN ALL
     COMMAND ${PLATFORMIO_CMD} -f -c clion run --target clean
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -37,6 +53,22 @@ add_custom_target(
     PLATFORMIO_UPLOADFS ALL
     COMMAND ${PLATFORMIO_CMD} -f -c clion run --target uploadfs
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_custom_target(
+        PLATFORMIO_UPLOADFS_HUZZAH ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target uploadfs --environment huzzah
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_custom_target(
+        PLATFORMIO_UPLOADFS_NODEMCUV2 ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target uploadfs --environment nodemcuv2
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_custom_target(
+        PLATFORMIO_UPLOADFS_ESP01 ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target uploadfs --environment esp01
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 add_custom_target(
