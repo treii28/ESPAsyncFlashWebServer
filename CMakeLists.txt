@@ -30,6 +30,11 @@ add_custom_target(
         COMMAND ${PLATFORMIO_CMD} -f -c clion run --target upload --environment esp01
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+add_custom_target(
+        PLATFORMIO_UPLOAD_ESP01_1M ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target upload --environment esp01_1m
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
 add_custom_target(
     PLATFORMIO_CLEAN ALL
@@ -68,6 +73,11 @@ add_custom_target(
 add_custom_target(
         PLATFORMIO_UPLOADFS_ESP01 ALL
         COMMAND ${PLATFORMIO_CMD} -f -c clion run --target uploadfs --environment esp01
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_custom_target(
+        PLATFORMIO_UPLOADFS_ESP01_1M ALL
+        COMMAND ${PLATFORMIO_CMD} -f -c clion run --target uploadfs --environment esp01_1m
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

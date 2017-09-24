@@ -1,6 +1,7 @@
 #ifndef  DBG_OUTPUT_PORT
 #define DBG_OUTPUT_PORT Serial
 #endif
+#define USE_REDIRECT_HANDLER 1
 
 // needed for platformio
 #ifndef Arduino_
@@ -18,9 +19,9 @@
 #include <ESPAsyncWebServer.h>
 #endif
 
-//ifndef SPIFFSEditor_H_
-//include <SPIFFSEditor.h>
-//endif
+#ifndef SPIFFSEditor_H_
+#include <SPIFFSEditor.h>
+#endif
 
 
 #ifndef WiFi_h
@@ -43,14 +44,19 @@
 #include "PathInfo.h"
 #endif
 
+#include <ArduinoJson.h>
+
 const byte DNS_PORT = 53;
-const char* apHostname = "WiFiGeoCache";
-const char* apSSID = "CCR_WiFi_GeoCache";
-const char* localSSID = "Samsung Galaxy Note 4";
-const char* localPass = "on the road again";
+const char* apHostname = "CCRGeo";
+const char* apSSID = "CCRGeo.local";
+const char* localSSID = "TP-Link_F965";
+const char* localPass = "smilingcheese464";
+//IPAddress localIP;
 
 IPAddress apIp ( 10, 10, 10, 10 ); // for softAP mode if used
-const char* captiveRedirect = "geo.htm";
+String apAddr = apIp.toString();
+
+const char* captiveRedirect = "/index.htm";
 
 AsyncWebServer asyncWebServer(80);
 DNSServer dnsServer;
@@ -60,6 +66,7 @@ String serverError;
 void returnOK(AsyncWebServerRequest *request) {request->send(200, "text/plain", "");}
 void returnFail(AsyncWebServerRequest *request, String msg) {request->send(500, "text/plain", msg + "\r\n");}
 void returnFailJSON(AsyncWebServerRequest *request, String msg) {request->send(500, "application/json", "{serverError:\"" + msg + "\"}");}
+void returnJSON(AsyncWebServerRequest *request, String msg) { request->send(200, "application/json", msg); }
 
 void logData(String csvString) {
     DBG_OUTPUT_PORT.println("appending entry to log");
@@ -203,6 +210,7 @@ bool printDir(AsyncWebServerRequest *request) {
 }
 bool loadFromFlash(AsyncWebServerRequest *request) {
     String path = request->url();
+
     DBG_OUTPUT_PORT.println("loadFromFlash: checking SPIFFS FS for " + path);
 
     bool pathExists = false;
@@ -247,9 +255,7 @@ bool loadFromFlash(AsyncWebServerRequest *request) {
         return false;
     }
 
-    delay(1000);
     DBG_OUTPUT_PORT.println("loadFromFlash: opening: " + upInf->getPath());
-    delay(1000);
     File webFile  = SPIFFS.open(upInf->getPath(), "r");
 
     if (!webFile){
@@ -288,8 +294,27 @@ void sendNotFoundInfo(AsyncWebServerRequest *request){
     }
     request->send(404, "text/plain", message);
 }
+void captiveRedir(AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse ( 302, "text/plain", "" );
+//        response->addHeader ( "Cache-Control", "no-cache, no-store, must-revalidate" );
+//        response->addHeader ( "Pragma", "no-cache" );
+//        response->addHeader ("Expires", "-1");
+//        response->setContentLength (CONTENT_LENGTH_UNKNOWN);
+    String fullRedirUrl = "http://" + apIp.toString() + String(captiveRedirect);
+    DBG_OUTPUT_PORT.println("sending 302 redirect to: " + fullRedirUrl);
+    response->addHeader ( "Location", fullRedirUrl );
+    request->send ( response );
+}
 void handleNotFound(AsyncWebServerRequest *request){
     String path = request->url();
+    String apHost = String(apHostname);
+    String rHost = request->host();
+    apHost.toLowerCase();
+    if((rHost != apAddr) && !(rHost.startsWith(apHost))) {
+        DBG_OUTPUT_PORT.println("non-local host request http://" + rHost + path);
+        //captiveRedir(request);
+    }
+
     DBG_OUTPUT_PORT.println("handleNotFound: no specific handler, checking SPIFFS for url:" + path);
     if(loadFromFlash(request)) return;
     sendNotFoundInfo(request);
@@ -371,9 +396,8 @@ void handleDelete(AsyncWebServerRequest *request) {
 }
 
 void initDebug() {
-    Serial.begin(9600);
     DBG_OUTPUT_PORT.begin(115200);
-    delay(1500);
+    delay(5000);
     DBG_OUTPUT_PORT.setDebugOutput(true);
     DBG_OUTPUT_PORT.println("Debug output initialized");
 }
@@ -383,11 +407,12 @@ void initWifi() {
     WiFi.mode((localSSID == "") ? WIFI_AP : WIFI_AP_STA);
     WiFi.softAPConfig ( apIp, apIp, IPAddress ( 255, 255, 255, 0 ) );
     WiFi.softAP(apSSID);
-    DBG_OUTPUT_PORT.println("SoftAP " + String(apHostname) + " started on " + String(WiFi.softAPIP()));
+    DBG_OUTPUT_PORT.println("SoftAP " + String(apHostname) + " started on " + WiFi.softAPIP().toString());
 
     if(localSSID != "") {
         DBG_OUTPUT_PORT.println("Initializing WiFi local connection: " + String(localSSID));
         WiFi.begin(localSSID, localPass);
+        /*
         if (WiFi.waitForConnectResult() != WL_CONNECTED) {
             DBG_OUTPUT_PORT.printf("STA: Failed!\n");
             WiFi.disconnect(false);
@@ -395,15 +420,16 @@ void initWifi() {
             DBG_OUTPUT_PORT.println("retrying WiFi local connection");
             WiFi.begin(localSSID, localPass);
         }
+        //localIP = WiFi.localIP();
+         */
     }
     DBG_OUTPUT_PORT.println("WiFi Initialization complete");
 }
 void initDNSServer() {
     DBG_OUTPUT_PORT.println("Initializing DNSServer for Captive Portal");
     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
-    dnsServer.start ( DNS_PORT, "*", WiFi.softAPIP() ); // captive portal redirect everything to here when in AP mode
+    dnsServer.start ( DNS_PORT, "*", apIp ); // captive portal redirect everything to here when in AP mode
 }
-/*
 void initMDNS() {
     DBG_OUTPUT_PORT.println("Initializing MDNS for local hostname on AP");
     if (MDNS.begin(apHostname)) {
@@ -413,51 +439,25 @@ void initMDNS() {
         DBG_OUTPUT_PORT.print(apHostname);
         DBG_OUTPUT_PORT.println(".local");
     }
+    DBG_OUTPUT_PORT.println("MDNS Initialization complete");
 }
-*/
-void initWebserver() {
-    //asyncWebServer.addHandler(new SPIFFSEditor("admin","admin"));
-
-    //Android captive portal. Maybe not needed. Might be handled by notFound handler.
-    asyncWebServer.addRewrite( new AsyncWebRewrite("/generate_204", captiveRedirect));
-    //asyncWebServer.on ( "/generate_204", returnOK );
-    //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
-    asyncWebServer.addRewrite( new AsyncWebRewrite("/fwlink", captiveRedirect));
-    //asyncWebServer.on ( "/fwlink", returnOK );
-    //Microsoft windows 10
-    //asyncWebServer.on ( "/connecttest.txt", returnOK );
-    asyncWebServer.addRewrite( new AsyncWebRewrite("/connecttest.txt", captiveRedirect));
-    // apple devices
-    asyncWebServer.addRewrite( new AsyncWebRewrite("/hotspot-detect.html", captiveRedirect));
-    //asyncWebServer.on ( "/hotspot-detect.html", returnOK );
-    asyncWebServer.addRewrite( new AsyncWebRewrite("/library/test/success.html", captiveRedirect));
-    //asyncWebServer.on ( "/library/test/success.html", returnOK );
-    // kindle
-    asyncWebServer.addRewrite( new AsyncWebRewrite("/kindle-wifi/wifistub.html", captiveRedirect));
-    //asyncWebServer.on ( "/kindle-wifi/wifistub.html", returnOK );
-
-    asyncWebServer.on("/delete", HTTP_DELETE, handleDelete);
-    // upload a file to /upload
-    asyncWebServer.on("/upload", HTTP_POST, returnOK, handleUpload);
-    // Catch-All Handlers
-    asyncWebServer.onFileUpload(handleUpload);
-    //asyncWebServer.onRequestBody(onBody);
-
-    asyncWebServer.on("/signin", HTTP_GET, addLog);
-
-    asyncWebServer.onNotFound(handleNotFound);
-
-    asyncWebServer.begin();
-    DBG_OUTPUT_PORT.println("HTTP asyncWebServer started");
+JsonObject& spiffsInfoAsJSON() {
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& object = jsonBuffer.createObject();
+    object["total_bytes"] = String(fs_info.totalBytes);
+    object["used_bytes"] = String(fs_info.usedBytes);
+    object["free_bytes"] = String(fs_info.totalBytes - fs_info.usedBytes);
+    object["block_size"] = String(fs_info.blockSize);
+    object["page_size"] = String(fs_info.pageSize);
+    object["max_open_files"] = String(fs_info.maxOpenFiles);
+    object["max_path_length"] = String(fs_info.maxPathLength);
+    return object;
 }
-void getSPIFFSInfo() {
-    DBG_OUTPUT_PORT.println("Filesystem Info:");
-    DBG_OUTPUT_PORT.println("      total bytes : " + String(fs_info.totalBytes));
-    DBG_OUTPUT_PORT.println("       used bytes : " + String(fs_info.usedBytes));
-    DBG_OUTPUT_PORT.println("       block size : " + String(fs_info.blockSize));
-    DBG_OUTPUT_PORT.println("        page size : " + String(fs_info.pageSize));
-    DBG_OUTPUT_PORT.println("   max open files : " + String(fs_info.maxOpenFiles));
-    DBG_OUTPUT_PORT.println("  max path length : " + String(fs_info.maxPathLength));
+void handleFSInfo(AsyncWebServerRequest *request) {
+    DBG_OUTPUT_PORT.println("SPIFFS info json requested.");
+    String siJStr;
+    spiffsInfoAsJSON().printTo(siJStr);
+    returnJSON(request, siJStr);
 }
 void formatSPIFFS() {
     Serial.println("Please wait 30 secs for SPIFFS to be formatted");
@@ -465,12 +465,70 @@ void formatSPIFFS() {
     Serial.println("Spiffs formatted");
     DBG_OUTPUT_PORT.println("SPIFFS Initialized.");
     if(SPIFFS.info(fs_info)) {
-        getSPIFFSInfo();
+        DBG_OUTPUT_PORT.println("SPIFFS info:");
+        spiffsInfoAsJSON().prettyPrintTo(DBG_OUTPUT_PORT);
+        DBG_OUTPUT_PORT.println("");
     } else {
         DBG_OUTPUT_PORT.println("Error getting SPIFFS info!");
     }
 }
+void initWebserver() {
+    DBG_OUTPUT_PORT.println("Setting up asynchronous web server");
+
+    DBG_OUTPUT_PORT.println("adding spiffs editor handler");
+    asyncWebServer.addHandler(new SPIFFSEditor("admin","admin"));
+
+    DBG_OUTPUT_PORT.println("Adding captive helper re-write rules.");
+
+#ifdef USE_REDIRECT_HANDLER
+    //Android captive portal. Maybe not needed. Might be handled by notFound handler.
+    asyncWebServer.on ( "/generate_204", captiveRedir );
+    asyncWebServer.on ( "/_assets/captivecheck/success.html", captiveRedir );
+    //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
+    asyncWebServer.on ( "/fwlink", captiveRedir );
+    //Microsoft windows 10
+    asyncWebServer.on ( "/connecttest.txt", captiveRedir );
+    // apple devices
+    asyncWebServer.on ( "/hotspot-detect.html", captiveRedir );
+    asyncWebServer.on ( "/library/test/success.html", captiveRedir );
+    // kindle
+    asyncWebServer.on ( "/kindle-wifi/wifistub.html", captiveRedir );
+#else
+    //Android captive portal. Maybe not needed. Might be handled by notFound handler.
+    asyncWebServer.addRewrite( new AsyncWebRewrite("/generate_204", captiveRedirect));
+    asyncWebServer.addRewrite( new AsyncWebRewrite("/_assets/captivecheck/success.html", captiveRedirect));
+    //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
+    asyncWebServer.addRewrite( new AsyncWebRewrite("/fwlink", captiveRedirect));
+    //Microsoft windows 10
+    asyncWebServer.addRewrite( new AsyncWebRewrite("/connecttest.txt", captiveRedirect));
+    // apple devices
+    asyncWebServer.addRewrite( new AsyncWebRewrite("/hotspot-detect.html", captiveRedirect));
+    asyncWebServer.addRewrite( new AsyncWebRewrite("/library/test/success.html", captiveRedirect));
+    // kindle
+    asyncWebServer.addRewrite( new AsyncWebRewrite("/kindle-wifi/wifistub.html", captiveRedirect));
+#endif
+
+    DBG_OUTPUT_PORT.println("adding file handler urls");
+    asyncWebServer.on("/delete", HTTP_DELETE, handleDelete);
+    // upload a file to /upload
+    asyncWebServer.on("/upload", HTTP_POST, returnOK, handleUpload);
+    asyncWebServer.on("/fsinfo", handleFSInfo);
+    // Catch-All Handlers
+    asyncWebServer.onFileUpload(handleUpload);
+    //asyncWebServer.onRequestBody(onBody);
+
+    DBG_OUTPUT_PORT.println("adding log signing rules");
+    asyncWebServer.on("/signin", HTTP_GET, addLog);
+
+    DBG_OUTPUT_PORT.println("default fallback for not found that checks spiffs");
+    asyncWebServer.onNotFound(handleNotFound);
+
+    asyncWebServer.begin();
+    delay(1000);
+    DBG_OUTPUT_PORT.println("HTTP asyncWebServer started");
+}
 void initSPIFFS() {
+    DBG_OUTPUT_PORT.println("Initializing SPIFFS filesystem.");
     if( ! SPIFFS.begin()){
         DBG_OUTPUT_PORT.println("SPIFFS initiatization failed. Retrying.");
         while(!SPIFFS.begin()){
@@ -478,14 +536,17 @@ void initSPIFFS() {
         }
     }
 
-
     if(SPIFFS.info(fs_info)) {
-        getSPIFFSInfo();
+        DBG_OUTPUT_PORT.println("SPIFFS info:");
+        spiffsInfoAsJSON().prettyPrintTo(DBG_OUTPUT_PORT);
+        DBG_OUTPUT_PORT.println("");
     } else {
         formatSPIFFS();
     }
+    DBG_OUTPUT_PORT.println("SPIFFS initiatization complete.");
 }
 void initOTA() {
+    DBG_OUTPUT_PORT.println("setting OTA handlers");
     // Port defaults to 8266
     // ArduinoOTA.setPort(8266);
 
@@ -496,13 +557,13 @@ void initOTA() {
     // ArduinoOTA.setPassword((const char *)"123");
 
     ArduinoOTA.onStart([]() {
-        Serial.println("Start");
+        DBG_OUTPUT_PORT.println("Start");
     });
     ArduinoOTA.onEnd([]() {
-        Serial.println("\nEnd");
+        DBG_OUTPUT_PORT.println("\nEnd");
     });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+        DBG_OUTPUT_PORT.printf("Progress: %u%%\r", (progress / (total / 100)));
     });
     ArduinoOTA.onError([](ota_error_t error) {
         Serial.printf("Error[%u]: ", error);
@@ -513,16 +574,25 @@ void initOTA() {
         else if (error == OTA_END_ERROR) Serial.println("End Failed");
     });
     ArduinoOTA.begin();
+    DBG_OUTPUT_PORT.println("finished setting up OTA handlers");
 }
 
 void setup() {
+    delay(2500);
     initDebug();
-    initWifi();
+    delay(2500);
     initDNSServer();
-    //initMDNS();
+    delay(2500);
+    initMDNS();
+    delay(2500);
     initWebserver();
+    delay(2500);
     initSPIFFS();
+    delay(2500);
     initOTA();
+    delay(2500);
+    initWifi();
+    delay(2500);
 }
 
 void loop() {
