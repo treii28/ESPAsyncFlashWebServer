@@ -182,11 +182,19 @@ PathInfo* getTruePathInfo(String fPath) {
     return fpInf;
 }
 
+bool dirExists(String dp) {
+    if (!dp.endsWith("/")) dp += "/";
+    if(dp == "/") return true;
+    Dir rDir = SPIFFS.openDir("/");
+    while (rDir.next()) if(rDir.fileName().startsWith(dp)) return true;
+    DBG_OUTPUT_PORT.println("dirExists: directory not found '" + dp + "'");
+    return false;
+}
 bool printDir(AsyncWebServerRequest *request) {
     String dPath = request->url();
     // remove any trailing slash
-    if(!dPath.endsWith("/"))
-        dPath += "/";
+    if(!dPath.endsWith("/")) dPath += "/";
+    if(!dirExists(dPath)) return false;
     DBG_OUTPUT_PORT.println("printDir: attempting printDir on '" + dPath + "'");
     Dir webDir = SPIFFS.openDir(dPath);
     String dirList = "";
@@ -278,21 +286,28 @@ bool loadFromFlash(AsyncWebServerRequest *request) {
 }
 
 void sendNotFoundInfo(AsyncWebServerRequest *request){
-    String message = "\nNo Handler\r\n";
-    message += "URI: ";
-    message += request->url();
-    message += "\nHOST: ";
-    message += request->host();
-    message += "\nMethod: ";
-    message += (request->method() == HTTP_GET)?"GET":"POST";
-    message += "\nParameters: ";
-    message += request->params();
-    message += "\n";
-    for (uint8_t i=0; i<request->params(); i++){
-        AsyncWebParameter* p = request->getParam(i);
-        message += String(p->name().c_str()) + " : " + String(p->value().c_str()) + "\r\n";
+    String fullRedirUrl = "http://" + apAddr + captiveRedirect;
+    String message = "<!DOCTYPE html><html lang=\"en\"><head>";
+    message += "<meta http-equiv=\"refresh\" content=\"3;url=" + fullRedirUrl + "\" />";
+    message += "<title>No Handler found for " + request->url() + "</title>";
+    message += "</head></body>";
+    message += "<h2>No Handler</h2><dl>";
+    message += "<dt>URI</dt><dd>" + request->url() + "</dd>";
+    message += "<dt>HOST</dt><dd>" + request->host() + "</dd>";
+    message += "<dt>Method</dt><dd>" + String(request->method()) + "</dd>";
+    message += "<dt>Parameters<dd>" + String(request->params()) + "</dd></dl>";
+    if(request->params() > 0) {
+        message += "<h3>parameter list:</h3><dl>";
+        for (uint8_t i=0; i<request->params(); i++){
+            AsyncWebParameter* p = request->getParam(i);
+            message += "<dt>" + String(p->name().c_str()) + "</dt></dd>" + String(p->value().c_str()) + "</dd>";
+        }
+        message += "</dl>";
     }
-    request->send(404, "text/plain", message);
+    message += "<br /><p>Page will be redirected to <a href=\"" + fullRedirUrl + "\">" + captiveRedirect + "</a> in 5 seconds...";
+    message += "</body></html>";
+
+    request->send(404, "text/html", message);
 }
 void captiveRedir(AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse ( 302, "text/plain", "" );
@@ -312,12 +327,13 @@ void handleNotFound(AsyncWebServerRequest *request){
     apHost.toLowerCase();
     if((rHost != apAddr) && !(rHost.startsWith(apHost))) {
         DBG_OUTPUT_PORT.println("non-local host request http://" + rHost + path);
+        sendNotFoundInfo(request);
         //captiveRedir(request);
+    } else {
+        DBG_OUTPUT_PORT.println("handleNotFound: no specific handler, checking SPIFFS for url:" + path);
+        if(loadFromFlash(request)) return;
+        sendNotFoundInfo(request);
     }
-
-    DBG_OUTPUT_PORT.println("handleNotFound: no specific handler, checking SPIFFS for url:" + path);
-    if(loadFromFlash(request)) return;
-    sendNotFoundInfo(request);
 }
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
     struct uploadRequest {
